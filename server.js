@@ -6,7 +6,6 @@ app.use(express.json());
 
 app.post('/scrape', async (req, res) => {
   const { url } = req.body;
-
   if (!url) return res.status(400).json({ error: 'Missing URL' });
 
   let browser;
@@ -18,7 +17,7 @@ app.post('/scrape', async (req, res) => {
 
     const page = await browser.newPage();
 
-    // Block images/fonts/stylesheets to reduce CPU/memory
+    // Block images, fonts, stylesheets for speed
     await page.setRequestInterception(true);
     page.on('request', req => {
       const type = req.resourceType();
@@ -26,26 +25,40 @@ app.post('/scrape', async (req, res) => {
       else req.continue();
     });
 
-    // Navigate to the URL
+    // Navigate to the page
     await page.goto(url, { waitUntil: 'domcontentloaded' });
 
-    // Set viewport
-    await page.setViewport({ width: 1080, height: 1024 });
+    // Wait a few seconds for JS-heavy content
+    await new Promise(r => setTimeout(r, 2000));
 
-    // Wait a short time to allow JS to load
-    await new Promise(r => setTimeout(r, 2000)); // replaces waitForTimeout
+    // Scrape all links
+    const links = await page.$$eval('a', nodes =>
+      nodes.map(n => ({ text: n.innerText.trim(), href: n.href }))
+    );
 
-    // Example: grab page title and first link text
-    const title = await page.title();
-    const firstLink = await page.$('a');
-    let linkText = '';
-    if (firstLink) {
-      linkText = await page.evaluate(el => el.textContent, firstLink);
-    }
+    // Scrape all headings (h1–h6)
+    const headings = await page.$$eval('h1, h2, h3, h4, h5, h6', nodes =>
+      nodes.map(n => ({ tag: n.tagName, text: n.innerText.trim() }))
+    );
+
+    // Scrape all paragraphs
+    const paragraphs = await page.$$eval('p', nodes =>
+      nodes.map(n => n.innerText.trim()).filter(t => t)
+    );
+
+    // Optional: get full page HTML
+    const html = await page.content();
 
     await browser.close();
 
-    res.json({ title, firstLinkText: linkText });
+    res.json({
+      url,
+      title: await page.title(),
+      links,
+      headings,
+      paragraphs,
+      html
+    });
   } catch (err) {
     if (browser) await browser.close();
     res.status(500).json({ error: err.message });
