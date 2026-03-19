@@ -33,21 +33,21 @@ app.post('/scrape', async (req, res) => {
     // Navigate to page
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // Accept cookie banners automatically (common buttons)
+    // Accept cookie banners automatically
     try {
       const buttons = await page.$$('button, a');
       for (const btn of buttons) {
         const text = await page.evaluate(el => el.innerText?.toLowerCase(), btn);
         if (text && (text.includes('accept') || text.includes('agree') || text.includes('allow all'))) {
           await btn.click();
-          await page.waitForTimeout(1000);
+          await new Promise(r => setTimeout(r, 1000)); // replaces waitForTimeout
           break;
         }
       }
     } catch {}
 
-    // Wait for dynamic content to render
-    await page.waitForTimeout(2000);
+    // Wait a little for JS content
+    await new Promise(r => setTimeout(r, 2000)); // replaces waitForTimeout
 
     // Extract structured data
     const data = await page.evaluate(() => {
@@ -71,8 +71,7 @@ app.post('/scrape', async (req, res) => {
       return { links, headings, paragraphs, lists, html: document.documentElement.outerHTML };
     });
 
-    // Include page title
-    data.title = document.title;
+    data.title = await page.title();
 
     await browser.close();
     res.json(data);
