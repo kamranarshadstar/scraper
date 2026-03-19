@@ -12,57 +12,77 @@ app.post('/scrape', async (req, res) => {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
     });
 
     const page = await browser.newPage();
 
-    // Block images, fonts, stylesheets for speed
+    // Block images, fonts, stylesheets to save CPU
     await page.setRequestInterception(true);
     page.on('request', req => {
       const type = req.resourceType();
-      if (['image', 'stylesheet', 'font'].includes(type)) req.abort();
+      if (['image', 'stylesheet', 'font', 'media'].includes(type)) req.abort();
       else req.continue();
     });
 
-    // Navigate to the page
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    // Navigate to page
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
 
-    // Wait a few seconds for JS-heavy content
-    await new Promise(r => setTimeout(r, 2000));
+    // Accept cookie banners automatically (common buttons)
+    try {
+      const buttons = await page.$$('button, a');
+      for (const btn of buttons) {
+        const text = await page.evaluate(el => el.innerText?.toLowerCase(), btn);
+        if (text && (text.includes('accept') || text.includes('agree') || text.includes('allow all'))) {
+          await btn.click();
+          await page.waitForTimeout(1000);
+          break;
+        }
+      }
+    } catch {}
 
-    // Scrape all links
-    const links = await page.$$eval('a', nodes =>
-      nodes.map(n => ({ text: n.innerText.trim(), href: n.href }))
-    );
+    // Wait for dynamic content to render
+    await page.waitForTimeout(2000);
 
-    // Scrape all headings (h1–h6)
-    const headings = await page.$$eval('h1, h2, h3, h4, h5, h6', nodes =>
-      nodes.map(n => ({ tag: n.tagName, text: n.innerText.trim() }))
-    );
+    // Extract structured data
+    const data = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll('a')).map(a => ({
+        text: a.innerText.trim(),
+        href: a.href
+      })).filter(l => l.href);
 
-    // Scrape all paragraphs
-    const paragraphs = await page.$$eval('p', nodes =>
-      nodes.map(n => n.innerText.trim()).filter(t => t)
-    );
+      const headings = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,h6')).map(h => ({
+        tag: h.tagName,
+        text: h.innerText.trim()
+      }));
 
-    // Optional: get full page HTML
-    const html = await page.content();
+      const paragraphs = Array.from(document.querySelectorAll('p')).map(p => p.innerText.trim()).filter(t => t);
+
+      const lists = Array.from(document.querySelectorAll('ul,ol')).map(list => ({
+        tag: list.tagName,
+        items: Array.from(list.querySelectorAll('li')).map(li => li.innerText.trim())
+      }));
+
+      return { links, headings, paragraphs, lists, html: document.documentElement.outerHTML };
+    });
+
+    // Include page title
+    data.title = document.title;
 
     await browser.close();
+    res.json(data);
 
-    res.json({
-      url,
-      title: await page.title(),
-      links,
-      headings,
-      paragraphs,
-      html
-    });
   } catch (err) {
     if (browser) await browser.close();
     res.status(500).json({ error: err.message });
   }
 });
 
-app.listen(3000, () => console.log('Scraper running on port 3000'));
+app.listen(3000, () => {
+  console.log('Scraper running on port 3000');
+});
