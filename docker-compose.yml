@@ -1,0 +1,10 @@
+version: "3.8"
+
+services:
+  scraper:
+    build: .
+    container_name: scraper
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    cpus: 2
