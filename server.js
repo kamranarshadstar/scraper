@@ -18,7 +18,7 @@ app.post('/scrape', async (req, res) => {
 
     const page = await browser.newPage();
 
-    // Block images, fonts, CSS to save CPU/memory
+    // Block images/fonts/stylesheets to reduce CPU/memory
     await page.setRequestInterception(true);
     page.on('request', req => {
       const type = req.resourceType();
@@ -26,40 +26,30 @@ app.post('/scrape', async (req, res) => {
       else req.continue();
     });
 
-    // Go to the page
+    // Navigate to the URL
     await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+    // Set viewport
     await page.setViewport({ width: 1080, height: 1024 });
 
-    // Example: search input if it exists
-    // Replace with page-specific selector
-    const searchSelector = 'input[name="q"], input[type="search"]';
-    const searchBox = await page.$(searchSelector);
-    if (searchBox) {
-      await searchBox.type('automate beyond recorder');
-      await searchBox.press('Enter');
-      await page.waitForTimeout(2000); // wait for results
-    }
+    // Wait a short time to allow JS to load
+    await new Promise(r => setTimeout(r, 2000)); // replaces waitForTimeout
 
-    // Example: get the first link text
-    const firstLink = await page.$('a'); // customize selector
+    // Example: grab page title and first link text
+    const title = await page.title();
+    const firstLink = await page.$('a');
     let linkText = '';
     if (firstLink) {
       linkText = await page.evaluate(el => el.textContent, firstLink);
     }
 
-    // Send response
-    res.json({
-      title: await page.title(),
-      firstLinkText: linkText
-    });
-
     await browser.close();
+
+    res.json({ title, firstLinkText: linkText });
   } catch (err) {
     if (browser) await browser.close();
     res.status(500).json({ error: err.message });
   }
 });
 
-app.listen(3000, () => {
-  console.log('Scraper server running on port 3000');
-});
+app.listen(3000, () => console.log('Scraper running on port 3000'));
